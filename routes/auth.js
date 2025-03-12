@@ -101,14 +101,9 @@ router.get('/me', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all users (admin only)
+// Get all users (both admin and employees can view)
 router.get('/users', authenticateToken, async (req, res) => {
   try {
-    // Check if user is admin
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Admin role required.' });
-    }
-    
     // Get all users from the database
     const { getAllUsers } = require('../models/users');
     const users = await getAllUsers();
@@ -197,6 +192,44 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Update user error:', error);
     res.status(500).json({ error: 'An error occurred while updating the user' });
+  }
+});
+
+// Delete user (admin only)
+router.delete('/users/:id', authenticateToken, async (req, res) => {
+  try {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Admin role required.' });
+    }
+    
+    const userId = req.params.id;
+    
+    // Get user by ID
+    const { getUserById } = require('../models/users');
+    const user = await getUserById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Delete user from database
+    const db = req.app.locals.db;
+    const sql = `DELETE FROM users WHERE id = ?`;
+    
+    await new Promise((resolve, reject) => {
+      db.run(sql, [userId], function(err) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    
+    res.json({
+      message: 'User deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete user error:', error);
+    res.status(500).json({ error: 'An error occurred while deleting the user' });
   }
 });
 

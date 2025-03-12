@@ -54,9 +54,11 @@ document.addEventListener('DOMContentLoaded', () => {
         userName.textContent = user.fullname;
         userRole.textContent = user.role;
         
-        // Show/hide admin-only sections
+        // Show user management section for both admin and employees
+        // But hide the form for employees (read-only access)
         if (user.role !== 'admin') {
-            usersNavItem.style.display = 'none';
+            // Hide the user form for employees (read-only access)
+            document.querySelector('#userForm').closest('.card').style.display = 'none';
         }
     } else {
         // No user info, redirect to login
@@ -144,23 +146,20 @@ async function loadDashboardData() {
             totalProducts.textContent = productsData.data.length;
         }
         
-        // Fetch users count (admin only)
-        const user = JSON.parse(localStorage.getItem('user'));
-        if (user && user.role === 'admin') {
-            const usersResponse = await fetch(`${AUTH_API_URL}/users`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            });
-            
-            if (usersResponse.ok) {
-                const usersData = await usersResponse.json();
-                const admins = usersData.data.filter(user => user.role === 'admin');
-                const employees = usersData.data.filter(user => user.role === 'employee');
-                
-                totalAdmins.textContent = admins.length;
-                totalEmployees.textContent = employees.length;
+        // Fetch users count (for both admin and employees)
+        const usersResponse = await fetch(`${AUTH_API_URL}/users`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
             }
+        });
+        
+        if (usersResponse.ok) {
+            const usersData = await usersResponse.json();
+            const admins = usersData.data.filter(user => user.role === 'admin');
+            const employees = usersData.data.filter(user => user.role === 'employee');
+            
+            totalAdmins.textContent = admins.length;
+            totalEmployees.textContent = employees.length;
         }
     } catch (error) {
         showAlert('Failed to load dashboard data: ' + error.message, 'danger');
@@ -193,11 +192,11 @@ async function fetchUsers() {
             }
         });
         
-        if (response.status === 401 || response.status === 403) {
-            // Token is invalid or expired or not admin
-            showAlert('You do not have permission to view users', 'danger');
-            showSection(dashboardSection);
-            setActiveLink(dashboardLink);
+        if (response.status === 401) {
+            // Token is invalid or expired
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = 'login.html';
             return;
         }
         
@@ -205,7 +204,7 @@ async function fetchUsers() {
         
         if (response.ok) {
             displayUsers(result.data);
-            // Update dashboard stats
+            // Update dashboard stats for all users, not just admin
             const admins = result.data.filter(user => user.role === 'admin');
             const employees = result.data.filter(user => user.role === 'employee');
             
@@ -227,6 +226,10 @@ function displayUsers(users) {
         return;
     }
     
+    // Get current user role
+    const currentUser = JSON.parse(localStorage.getItem('user'));
+    const isAdmin = currentUser && currentUser.role === 'admin';
+    
     users.forEach(user => {
         const userCard = userTemplate.content.cloneNode(true);
         
@@ -238,12 +241,33 @@ function displayUsers(users) {
         roleElement.textContent = user.role;
         roleElement.classList.add(user.role === 'admin' ? 'role-admin' : 'role-employee');
         
-        // Set data attributes for edit
-        const editBtn = userCard.querySelector('.edit-user');
-        editBtn.dataset.id = user.id;
+        // Handle user actions based on role
+        const userActions = userCard.querySelector('.user-actions');
         
-        // Add event listeners
-        editBtn.addEventListener('click', () => loadUserForEdit(user));
+        if (isAdmin) {
+            // Admin can edit and delete all users
+            const editBtn = userCard.querySelector('.edit-user');
+            editBtn.dataset.id = user.id;
+            editBtn.addEventListener('click', () => loadUserForEdit(user));
+            
+            // Add delete button for admins
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'btn btn-sm btn-outline-danger ms-2 delete-user';
+            deleteBtn.innerHTML = '<i class="bi bi-trash"></i> Delete';
+            deleteBtn.dataset.id = user.id;
+            deleteBtn.addEventListener('click', () => deleteUser(user.id));
+            userActions.appendChild(deleteBtn);
+        } else {
+            // Employees can only view users, remove edit button
+            const editBtn = userCard.querySelector('.edit-user');
+            editBtn.remove();
+            
+            // Add a view-only indicator
+            const viewOnlyBadge = document.createElement('span');
+            viewOnlyBadge.className = 'badge bg-secondary';
+            viewOnlyBadge.textContent = 'View Only';
+            userActions.appendChild(viewOnlyBadge);
+        }
         
         usersList.appendChild(userCard);
     });
@@ -347,4 +371,44 @@ function showAlert(message, type) {
     setTimeout(() => {
         alertElement.style.display = 'none';
     }, 5000);
+}
+
+// Delete a user
+async function deleteUser(id) {
+    if (!confirm('Are you sure you want to delete this user?')) {
+        return;
+    }
+    
+    const token = localStorage.getItem('token');
+    if (!token) {
+        window.location.href = 'login.html';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${AUTH_API_URL}/users/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.status === 401 || response.status === 403) {
+            // Token is invalid or expired or not admin
+            showAlert('You do not have permission to delete users', 'danger');
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showAlert('User deleted successfully!', 'success');
+            fetchUsers();
+            loadDashboardData();
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Failed to delete user: ' + error.message, 'danger');
+    }
 }
