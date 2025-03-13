@@ -23,24 +23,24 @@ const initializeUsersTable = () => {
       } else {
         console.log('Users table ready');
         
-        // // Check if admin user exists, if not create default admin (Jesus)
-        // try {
-        //   const adminExists = await getUserByUsername('jesus');
-        //   if (!adminExists) {
-        //     // Create default admin user
-        //     const defaultAdmin = {
-        //       username: 'jesus',
-        //       password: 'admin123', // This will be hashed before storing
-        //       fullname: 'Jesus (Owner)',
-        //       role: 'admin'
-        //     };
-        //     await createUser(defaultAdmin);
-        //     console.log('Default admin user created');
-        //   }
-        //   resolve();
-        // } catch (error) {
-        //   reject(error);
-        // }
+        // Check if admin user exists, if not create default admin (Jesus)
+        try {
+          const adminExists = await getUserByRole('admin');
+          if (!adminExists) {
+            // Create default admin user
+            const defaultAdmin = {
+              username: 'jesus',
+              password: 'admin123', // This will be hashed before storing
+              fullname: 'Jesus (Owner)',
+              role: 'admin'
+            };
+            await createUser(defaultAdmin);
+            console.log('Default admin user created');
+          }
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
       }
     });
   });
@@ -80,6 +80,19 @@ const createUser = (userData) => {
 const getUserByUsername = (username) => {
   return new Promise((resolve, reject) => {
     db.get('SELECT * FROM users WHERE username = ?', [username], (err, row) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(row);
+      }
+    });
+  });
+};
+
+// Get user by rol
+const getUserByRole = (role) => {
+  return new Promise((resolve, reject) => {
+    db.get('SELECT * FROM users WHERE role =?', [role], (err, row) => {
       if (err) {
         reject(err);
       } else {
