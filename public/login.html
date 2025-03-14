@@ -121,8 +121,14 @@
                     localStorage.setItem('token', result.token);
                     localStorage.setItem('user', JSON.stringify(result.user));
                     
-                    // Redirect to dashboard page
-                    window.location.href = 'dashboard.html';
+                    // Redirect based on user role
+                    if (result.user.role === 'cliente') {
+                        // Clients go directly to sales page
+                        window.location.href = 'sales.html';
+                    } else {
+                        // Admin and employees go to dashboard
+                        window.location.href = 'dashboard.html';
+                    }
                 } else {
                     showAlert(result.error || 'Login failed', 'danger');
                 }

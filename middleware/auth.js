@@ -52,9 +52,37 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
+// Middleware to check if user is admin or employee
+const isAdminOrEmployee = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Access denied. Not authenticated.' });
+  }
+
+  if (req.user.role !== 'admin' && req.user.role !== 'employee') {
+    return res.status(403).json({ error: 'Access denied. Admin or Employee role required.' });
+  }
+
+  next();
+};
+
+// Middleware to check if user is a client
+const isClient = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Access denied. Not authenticated.' });
+  }
+
+  if (req.user.role !== 'cliente') {
+    return res.status(403).json({ error: 'Access denied. Client role required.' });
+  }
+
+  next();
+};
+
 module.exports = {
   JWT_SECRET,
   generateToken,
   authenticateToken,
-  isAdmin
+  isAdmin,
+  isAdminOrEmployee,
+  isClient
 };

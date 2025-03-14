@@ -33,9 +33,83 @@ const db = new sqlite3.Database(dbPath, (err) => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`, (err) => {
       if (err) {
-        console.error('Error creating table:', err.message);
+        console.error('Error creating products table:', err.message);
       } else {
         console.log('Products table ready');
+      }
+    });
+    
+    // Create orders table if it doesn't exist
+    db.run(`CREATE TABLE IF NOT EXISTS orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      customer_name TEXT,
+      total_amount REAL NOT NULL,
+      payment_method TEXT NOT NULL,
+      payment_status TEXT NOT NULL DEFAULT 'pending',
+      order_status TEXT NOT NULL DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id)
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating orders table:', err.message);
+      } else {
+        console.log('Orders table ready');
+      }
+    });
+    
+    // Create order_items table if it doesn't exist
+    db.run(`CREATE TABLE IF NOT EXISTS order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL,
+      unit_price REAL NOT NULL,
+      subtotal REAL NOT NULL,
+      FOREIGN KEY (order_id) REFERENCES orders (id),
+      FOREIGN KEY (product_id) REFERENCES products (id)
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating order_items table:', err.message);
+      } else {
+        console.log('Order items table ready');
+      }
+    });
+    
+    // Create payment_methods table if it doesn't exist
+    db.run(`CREATE TABLE IF NOT EXISTS payment_methods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      is_active BOOLEAN DEFAULT 1
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating payment_methods table:', err.message);
+      } else {
+        console.log('Payment methods table ready');
+        
+        // Insert default payment methods if none exist
+        db.get('SELECT COUNT(*) as count FROM payment_methods', (err, row) => {
+          if (err) {
+            console.error('Error checking payment methods:', err.message);
+          } else if (row.count === 0) {
+            // Insert default payment methods
+            const defaultMethods = [
+              ['Cash', 'Cash payment at checkout'],
+              ['Credit Card', 'Payment with credit card'],
+              ['Debit Card', 'Payment with debit card']
+            ];
+            
+            const stmt = db.prepare('INSERT INTO payment_methods (name, description) VALUES (?, ?)');
+            defaultMethods.forEach(method => {
+              stmt.run(method, (err) => {
+                if (err) console.error('Error inserting payment method:', err.message);
+              });
+            });
+            stmt.finalize();
+            console.log('Default payment methods inserted');
+          }
+        });
       }
     });
   }
@@ -53,20 +127,15 @@ app.locals.db = db;
 // Import routes
 const productRoutes = require('./routes/products');
 const authRoutes = require('./routes/auth');
+const salesRoutes = require('./routes/sales');
 
 // Import middleware
 const { authenticateToken } = require('./middleware/auth');
 
 // Use routes
 app.use('/api/auth', authRoutes);
-
-// Remove these lines as they're causing issues with the middleware
-// The authenticateToken middleware is now applied directly in the route handlers
-// app.use('/api/auth/me', authenticateToken);
-// app.use('/api/auth/users', authenticateToken);
-// app.use('/api/auth/users/:id', authenticateToken);
-
 app.use('/api/products', authenticateToken, productRoutes); // Protect product routes
+app.use('/api/sales', authenticateToken, salesRoutes); // Protect sales routes
 
 // Root route
 app.get('/', (req, res) => {
@@ -74,7 +143,8 @@ app.get('/', (req, res) => {
     message: 'Welcome to the Products API',
     endpoints: {
       auth: '/api/auth',
-      products: '/api/products'
+      products: '/api/products',
+      sales: '/api/sales'
     }
   });
 });

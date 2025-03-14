@@ -18,6 +18,9 @@ const userRole = document.getElementById('userRole');
 const totalProducts = document.getElementById('totalProducts');
 const totalAdmins = document.getElementById('totalAdmins');
 const totalEmployees = document.getElementById('totalEmployees');
+const productsStatsCard = document.getElementById('productsStatsCard');
+const adminsStatsCard = document.getElementById('adminsStatsCard');
+const employeesStatsCard = document.getElementById('employeesStatsCard');
 
 // DOM Elements - User Management
 const userForm = document.getElementById('userForm');
@@ -32,6 +35,10 @@ const refreshUsersBtn = document.getElementById('refreshUsers');
 const usersList = document.getElementById('usersList');
 const userTemplate = document.getElementById('userTemplate');
 const alertElement = document.getElementById('alert');
+const userSearchInput = document.getElementById('userSearch');
+
+// Store users data globally for filtering
+let allUsers = [];
 
 // API URLs
 const AUTH_API_URL = '/api/auth';
@@ -50,6 +57,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Get user info
     const user = JSON.parse(localStorage.getItem('user'));
     if (user) {
+        // Check if user is a client - they shouldn't access dashboard
+        if (user.role === 'cliente') {
+            // Redirect clients to sales page
+            window.location.href = 'sales.html';
+            return;
+        }
+        
         // Display user info
         userName.textContent = user.fullname;
         userRole.textContent = user.role;
@@ -68,6 +82,11 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Load dashboard data
     loadDashboardData();
+    
+    // Add search functionality for users
+    if (userSearchInput) {
+        userSearchInput.addEventListener('input', filterUsers);
+    }
 });
 
 // Event Listeners - Navigation
@@ -98,6 +117,57 @@ logoutBtn.addEventListener('click', (e) => {
     localStorage.removeItem('user');
     window.location.href = 'login.html';
 });
+
+// Event Listeners - Dashboard Stats Cards
+productsStatsCard.addEventListener('click', () => {
+    showProductsList();
+});
+
+adminsStatsCard.addEventListener('click', () => {
+    // Navigate to users section first
+    showSection(usersSection);
+    setActiveLink(usersLink);
+    fetchUsers();
+    // Apply filter for admin users
+    setTimeout(() => {
+        if (userSearchInput) {
+            userSearchInput.value = 'admin';
+            filterUsers();
+        }
+    }, 500);
+});
+
+employeesStatsCard.addEventListener('click', () => {
+    // Navigate to users section first
+    showSection(usersSection);
+    setActiveLink(usersLink);
+    fetchUsers();
+    // Apply filter for employee users
+    setTimeout(() => {
+        if (userSearchInput) {
+            userSearchInput.value = 'employee';
+            filterUsers();
+        }
+    }, 500);
+});
+
+// Add event listener for clients stats card if it exists
+const clientesStatsCard = document.getElementById('clientesStatsCard');
+if (clientesStatsCard) {
+    clientesStatsCard.addEventListener('click', () => {
+        // Navigate to users section first
+        showSection(usersSection);
+        setActiveLink(usersLink);
+        fetchUsers();
+        // Apply filter for cliente users
+        setTimeout(() => {
+            if (userSearchInput) {
+                userSearchInput.value = 'cliente';
+                filterUsers();
+            }
+        }, 500);
+    });
+}
 
 // Event Listeners - User Management
 userForm.addEventListener('submit', handleUserFormSubmit);
@@ -157,9 +227,16 @@ async function loadDashboardData() {
             const usersData = await usersResponse.json();
             const admins = usersData.data.filter(user => user.role === 'admin');
             const employees = usersData.data.filter(user => user.role === 'employee');
+            const clientes = usersData.data.filter(user => user.role === 'cliente');
             
             totalAdmins.textContent = admins.length;
             totalEmployees.textContent = employees.length;
+            
+            // Update clients count if the element exists
+            const totalClientes = document.getElementById('totalClientes');
+            if (totalClientes) {
+                totalClientes.textContent = clientes.length;
+            }
         }
     } catch (error) {
         showAlert('Failed to load dashboard data: ' + error.message, 'danger');
@@ -175,6 +252,106 @@ function loadProductsSection() {
             <iframe src="index.html" title="Products Management" allowfullscreen></iframe>
         </div>
     `;
+}
+
+// Function to display products list directly
+async function showProductsList() {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        // Show products section but with custom content
+        showSection(productsSection);
+        setActiveLink(dashboardLink); // Keep dashboard link active instead of products link
+        
+        // Set loading state
+        productsSection.innerHTML = `
+            <h2 class="section-title">Products List</h2>
+            <div class="card">
+                <div class="card-body">
+                    <p>Loading products...</p>
+                </div>
+            </div>
+        `;
+        
+        // Fetch products
+        const response = await fetch(PRODUCTS_API_URL, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            const products = result.data;
+            
+            // Create products list HTML
+            let productsHTML = `
+                <h2 class="section-title">Products List</h2>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h3 class="card-title mb-0">All Products (${products.length})</h3>
+                            <button id="backToDashboard" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-arrow-left"></i> Back to Dashboard
+                            </button>
+                        </div>
+                        <div class="row" id="productsListView">
+            `;
+            
+            if (products.length === 0) {
+                productsHTML += `<div class="col-12"><p class="text-center">No products found.</p></div>`;
+            } else {
+                products.forEach(product => {
+                    productsHTML += `
+                        <div class="col-md-4 mb-3">
+                            <div class="card h-100">
+                                <div class="card-body">
+                                    <h5 class="card-title">${product.name}</h5>
+                                    <p class="card-text">${product.description || 'No description'}</p>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="badge bg-primary">$${product.price.toFixed(2)}</span>
+                                        <span class="badge bg-secondary">Stock: ${product.stock || 0}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            productsHTML += `
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            productsSection.innerHTML = productsHTML;
+            
+            // Add event listener to back button
+            document.getElementById('backToDashboard').addEventListener('click', () => {
+                showSection(dashboardSection);
+                setActiveLink(dashboardLink);
+                loadDashboardData();
+            });
+            
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Failed to fetch products: ' + error.message, 'danger');
+    }
 }
 
 // Functions - User Management
@@ -203,13 +380,140 @@ async function fetchUsers() {
         const result = await response.json();
         
         if (response.ok) {
-            displayUsers(result.data);
+            // Store users globally for filtering
+            allUsers = result.data;
+            displayUsers(allUsers);
+            
             // Update dashboard stats for all users, not just admin
             const admins = result.data.filter(user => user.role === 'admin');
             const employees = result.data.filter(user => user.role === 'employee');
             
             totalAdmins.textContent = admins.length;
             totalEmployees.textContent = employees.length;
+        } else {
+            showAlert('Error: ' + result.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Failed to fetch users: ' + error.message, 'danger');
+    }
+}
+
+// Filter users based on search input
+function filterUsers() {
+    const searchTerm = userSearchInput.value.toLowerCase().trim();
+    
+    if (!searchTerm) {
+        // If search is empty, show all users
+        displayUsers(allUsers);
+        return;
+    }
+    
+    // Filter users based on username, fullname or role
+    const filteredUsers = allUsers.filter(user => {
+        return (
+            user.username.toLowerCase().includes(searchTerm) ||
+            user.fullname.toLowerCase().includes(searchTerm) ||
+            user.role.toLowerCase().includes(searchTerm)
+        );
+    });
+    
+    displayUsers(filteredUsers);
+}
+
+// Function to display filtered users list directly
+async function showFilteredUsersList(roleFilter) {
+    try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        // Show custom section for users
+        showSection(usersSection);
+        setActiveLink(dashboardLink); // Keep dashboard link active instead of users link
+        
+        // Set loading state
+        usersSection.innerHTML = `
+            <h2 class="section-title">${roleFilter === 'admin' ? 'Admin' : 'Employee'} Users</h2>
+            <div class="card">
+                <div class="card-body">
+                    <p>Loading users...</p>
+                </div>
+            </div>
+        `;
+        
+        // Fetch users
+        const response = await fetch(`${AUTH_API_URL}/users`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (response.status === 401) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = 'login.html';
+            return;
+        }
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            // Filter users by role
+            const filteredUsers = result.data.filter(user => user.role === roleFilter);
+            
+            // Create users list HTML
+            let usersHTML = `
+                <h2 class="section-title">${roleFilter === 'admin' ? 'Admin' : 'Employee'} Users</h2>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h3 class="card-title mb-0">${roleFilter === 'admin' ? 'Admin' : 'Employee'} Users (${filteredUsers.length})</h3>
+                            <button id="backToDashboard" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-arrow-left"></i> Back to Dashboard
+                            </button>
+                        </div>
+                        <div id="filteredUsersList" class="mt-3">
+            `;
+            
+            if (filteredUsers.length === 0) {
+                usersHTML += `<div class="alert alert-info">No ${roleFilter} users found.</div>`;
+            } else {
+                filteredUsers.forEach(user => {
+                    usersHTML += `
+                        <div class="card user-card mb-3">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="user-fullname mb-1">${user.fullname}</h5>
+                                        <div class="d-flex align-items-center">
+                                            <span class="user-username text-muted me-3">${user.username}</span>
+                                            <span class="user-role ${user.role === 'admin' ? 'role-admin' : 'role-employee'}">${user.role}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            usersHTML += `
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            usersSection.innerHTML = usersHTML;
+            
+            // Add event listener to back button
+            document.getElementById('backToDashboard').addEventListener('click', () => {
+                showSection(dashboardSection);
+                setActiveLink(dashboardLink);
+                loadDashboardData();
+            });
+            
         } else {
             showAlert('Error: ' + result.error, 'danger');
         }
@@ -239,7 +543,15 @@ function displayUsers(users) {
         
         const roleElement = userCard.querySelector('.user-role');
         roleElement.textContent = user.role;
-        roleElement.classList.add(user.role === 'admin' ? 'role-admin' : 'role-employee');
+        
+        // Add appropriate class based on role
+        if (user.role === 'admin') {
+            roleElement.classList.add('role-admin');
+        } else if (user.role === 'employee') {
+            roleElement.classList.add('role-employee');
+        } else if (user.role === 'cliente') {
+            roleElement.classList.add('role-cliente');
+        }
         
         // Handle user actions based on role
         const userActions = userCard.querySelector('.user-actions');

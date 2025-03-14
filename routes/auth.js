@@ -59,8 +59,8 @@ router.post('/register', async (req, res) => {
     }
     
     // Validate role
-    if (role !== 'admin' && role !== 'employee') {
-      return res.status(400).json({ error: 'Role must be either "admin" or "employee"' });
+    if (role !== 'admin' && role !== 'employee' && role !== 'cliente') {
+      return res.status(400).json({ error: 'Role must be either "admin", "employee", or "cliente"' });
     }
     
     // Check if username already exists
@@ -137,8 +137,8 @@ router.put('/users/:id', authenticateToken, async (req, res) => {
     }
     
     // Validate role
-    if (role !== 'admin' && role !== 'employee') {
-      return res.status(400).json({ error: 'Role must be either "admin" or "employee"' });
+    if (role !== 'admin' && role !== 'employee' && role !== 'cliente') {
+      return res.status(400).json({ error: 'Role must be either "admin", "employee", or "cliente"' });
     }
     
     // Get user by ID

@@ -11,9 +11,13 @@ const stockInput = document.getElementById('stock');
 const cancelEditBtn = document.getElementById('cancelEdit');
 const refreshProductsBtn = document.getElementById('refreshProducts');
 const alertElement = document.getElementById('alert');
+const productSearchInput = document.getElementById('productSearch');
 
 // API URL
 const API_URL = '/api/products';
+
+// Store products data globally for filtering
+let allProducts = [];
 
 // Check authentication
 document.addEventListener('DOMContentLoaded', () => {
@@ -25,33 +29,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
     
-    // Display user info
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (user) {
-        // Add user info to the page
-        const userInfoElement = document.createElement('div');
-        userInfoElement.className = 'mb-4 d-flex justify-content-between align-items-center';
-        userInfoElement.innerHTML = `
-            <div>
-                <h5 class="mb-0">Welcome, ${user.fullname}</h5>
-                <small class="text-muted">${user.role}</small>
-            </div>
-            <button id="logoutBtn" class="btn btn-outline-danger">Logout</button>
-        `;
-        
-        // Insert before the form section
-        document.querySelector('.container').insertBefore(userInfoElement, document.querySelector('.form-section'));
-        
-        // Add logout functionality
-        document.getElementById('logoutBtn').addEventListener('click', () => {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.href = 'login.html';
-        });
-    }
-    
     // Load products
     fetchProducts();
+    
+    // Add search functionality
+    if (productSearchInput) {
+        productSearchInput.addEventListener('input', filterProducts);
+    }
 });
 
 // Event Listeners
@@ -87,13 +71,37 @@ async function fetchProducts() {
         const result = await response.json();
         
         if (response.ok) {
-            displayProducts(result.data);
+            // Store products globally for filtering
+            allProducts = result.data;
+            displayProducts(allProducts);
         } else {
             showAlert('Error: ' + result.error, 'danger');
         }
     } catch (error) {
         showAlert('Failed to fetch products: ' + error.message, 'danger');
     }
+}
+
+// Filter products based on search input
+function filterProducts() {
+    const searchTerm = productSearchInput.value.toLowerCase().trim();
+    
+    if (!searchTerm) {
+        // If search is empty, show all products
+        displayProducts(allProducts);
+        return;
+    }
+    
+    // Filter products based on name, description or price
+    const filteredProducts = allProducts.filter(product => {
+        return (
+            product.name.toLowerCase().includes(searchTerm) ||
+            (product.description && product.description.toLowerCase().includes(searchTerm)) ||
+            product.price.toString().includes(searchTerm)
+        );
+    });
+    
+    displayProducts(filteredProducts);
 }
 
 // Display products in the UI
