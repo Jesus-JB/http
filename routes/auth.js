@@ -1,12 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const { getUserByUsername, createUser } = require('../models/users');
-const { generateToken, authenticateToken } = require('../middleware/auth');
+const UserService = require('../services/userService');
+const { generateToken, generateRefreshToken, verifyRefreshToken, authenticateToken } = require('../middleware/auth');
+const { loginLimiter } = require('../middleware/rate-limit');
+const { csrfProtection, handleCsrfError } = require('../middleware/csrf');
 
-// Login route
-router.post('/login', async (req, res) => {
+// Apply CSRF protection to all routes
+router.use(csrfProtection);
+router.use(handleCsrfError);
+
+// Get CSRF token
+router.get('/csrf-token', (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
+});
+
+// Login route with rate limiting
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { username, password } = req.body;
+    const db = req.app.locals.db;
+    const userService = new UserService(db);
     
     // Validate input
     if (!username || !password) {
@@ -14,7 +27,7 @@ router.post('/login', async (req, res) => {
     }
     
     // Find user by username
-    const user = await getUserByUsername(username);
+    const user = await userService.getUserByUsername(username);
     if (!user) {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
@@ -26,10 +39,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
     
-    // Generate JWT token
-    const token = generateToken(user);
+    // Generate tokens
+    const accessToken = generateToken(user);
+    const refreshToken = generateRefreshToken(user);
     
-    // Return user info and token (exclude password)
+    // Return user info and tokens (exclude password)
     res.json({
       message: 'Login successful',
       user: {
@@ -38,7 +52,8 @@ router.post('/login', async (req, res) => {
         fullname: user.fullname,
         role: user.role
       },
-      token
+      token: accessToken,
+      refreshToken
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -46,10 +61,49 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Refresh token route
+router.post('/refresh-token', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    const db = req.app.locals.db;
+    const userService = new UserService(db);
+    
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'Refresh token is required' });
+    }
+    
+    // Verify refresh token
+    const decoded = verifyRefreshToken(refreshToken);
+    if (!decoded) {
+      return res.status(403).json({ error: 'Invalid refresh token' });
+    }
+    
+    // Get user from database
+    const user = await userService.getUserById(decoded.id);
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Generate new access token
+    const accessToken = generateToken(user);
+    
+    res.json({
+      message: 'Token refreshed successfully',
+      token: accessToken
+    });
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(500).json({ error: 'An error occurred during token refresh' });
+  }
+});
+
 // Register route (only admin can create new users)
-router.post('/register', async (req, res) => {
+router.post('/register', authenticateToken, async (req, res) => {
   try {
     const { username, password, fullname, role } = req.body;
+    const db = req.app.locals.db;
+    const userService = new UserService(db);
     
     // Validate input
     if (!username || !password || !fullname || !role) {
@@ -59,20 +113,25 @@ router.post('/register', async (req, res) => {
     }
     
     // Validate role
-    if (role !== 'admin' && role !== 'employee') {
-      return res.status(400).json({ error: 'Role must be either "admin" or "employee"' });
+    if (role !== 'admin' && role !== 'employee' && role !== 'client') {
+      return res.status(400).json({ error: 'Role must be either "admin", "employee", or "client"' });
     }
     
     // Check if username already exists
-    const existingUser = await getUserByUsername(username);
+    const existingUser = await userService.getUserByUsername(username);
     if (existingUser) {
       return res.status(400).json({ error: 'Username already exists' });
     }
     
     // Create new user
-    const newUser = await createUser({
+    const bcrypt = require('bcrypt');
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    
+    const newUser = await userService.createUser({
       username,
-      password,
+      password: hashedPassword,
+      email: username, // Using username as email for simplicity
       fullname,
       role
     });
@@ -104,9 +163,11 @@ router.get('/me', authenticateToken, async (req, res) => {
 // Get all users (both admin and employees can view)
 router.get('/users', authenticateToken, async (req, res) => {
   try {
+    const db = req.app.locals.db;
+    const userService = new UserService(db);
+    
     // Get all users from the database
-    const { getAllUsers } = require('../models/users');
-    const users = await getAllUsers();
+    const users = await userService.getAllUsers();
     
     res.json({
       message: 'Users retrieved successfully',
@@ -115,121 +176,6 @@ router.get('/users', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Get all users error:', error);
     res.status(500).json({ error: 'An error occurred while getting users' });
-  }
-});
-
-// Update user (admin only)
-router.put('/users/:id', authenticateToken, async (req, res) => {
-  try {
-    // Check if user is admin
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Admin role required.' });
-    }
-    
-    const userId = req.params.id;
-    const { username, password, fullname, role } = req.body;
-    
-    // Validate input
-    if (!username || !fullname || !role) {
-      return res.status(400).json({ 
-        error: 'Username, fullname, and role are required' 
-      });
-    }
-    
-    // Validate role
-    if (role !== 'admin' && role !== 'employee') {
-      return res.status(400).json({ error: 'Role must be either "admin" or "employee"' });
-    }
-    
-    // Get user by ID
-    const { getUserById, getUserByUsername } = require('../models/users');
-    const user = await getUserById(userId);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    // Check if username already exists (if changing username)
-    if (username !== user.username) {
-      const existingUser = await getUserByUsername(username);
-      if (existingUser) {
-        return res.status(400).json({ error: 'Username already exists' });
-      }
-    }
-    
-    // Update user in database
-    const db = req.app.locals.db;
-    let sql, params;
-    
-    if (password) {
-      // If password is provided, update it too
-      const bcrypt = require('bcrypt');
-      const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(password, salt);
-      
-      sql = `UPDATE users SET username = ?, password = ?, fullname = ?, role = ? WHERE id = ?`;
-      params = [username, hashedPassword, fullname, role, userId];
-    } else {
-      // Don't update password
-      sql = `UPDATE users SET username = ?, fullname = ?, role = ? WHERE id = ?`;
-      params = [username, fullname, role, userId];
-    }
-    
-    await new Promise((resolve, reject) => {
-      db.run(sql, params, function(err) {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-    
-    // Get updated user
-    const updatedUser = await getUserById(userId);
-    
-    res.json({
-      message: 'User updated successfully',
-      user: updatedUser
-    });
-  } catch (error) {
-    console.error('Update user error:', error);
-    res.status(500).json({ error: 'An error occurred while updating the user' });
-  }
-});
-
-// Delete user (admin only)
-router.delete('/users/:id', authenticateToken, async (req, res) => {
-  try {
-    // Check if user is admin
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access denied. Admin role required.' });
-    }
-    
-    const userId = req.params.id;
-    
-    // Get user by ID
-    const { getUserById } = require('../models/users');
-    const user = await getUserById(userId);
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    // Delete user from database
-    const db = req.app.locals.db;
-    const sql = `DELETE FROM users WHERE id = ?`;
-    
-    await new Promise((resolve, reject) => {
-      db.run(sql, [userId], function(err) {
-        if (err) reject(err);
-        else resolve();
-      });
-    });
-    
-    res.json({
-      message: 'User deleted successfully'
-    });
-  } catch (error) {
-    console.error('Delete user error:', error);
-    res.status(500).json({ error: 'An error occurred while deleting the user' });
   }
 });
 

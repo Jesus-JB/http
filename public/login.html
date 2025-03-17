@@ -67,38 +67,102 @@
 
         // API URL
         const API_URL = '/api/auth';
+        
+        // CSRF token storage
+        let csrfToken = '';
+        
+        // Fetch CSRF token
+        async function fetchCsrfToken() {
+            try {
+                const response = await fetch(`${API_URL}/csrf-token`);
+                if (response.ok) {
+                    const data = await response.json();
+                    csrfToken = data.csrfToken;
+                    return csrfToken;
+                } else {
+                    console.error('Failed to fetch CSRF token');
+                    return null;
+                }
+            } catch (error) {
+                console.error('Error fetching CSRF token:', error);
+                return null;
+            }
+        }
 
         // Check if user is already logged in
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Fetch CSRF token first
+            await fetchCsrfToken();
+            
             const token = localStorage.getItem('token');
+            const refreshToken = localStorage.getItem('refreshToken');
+            
             if (token) {
                 // Verify token validity
-                fetch(`${API_URL}/me`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                })
-                .then(response => {
+                try {
+                    const response = await fetch(`${API_URL}/me`, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'CSRF-Token': csrfToken
+                        }
+                    });
+                    
                     if (response.ok) {
-                        // Token is valid, redirect to products page
-                        window.location.href = 'index.html';
+                        // Token is valid, redirect to dashboard page
+                        window.location.href = 'dashboard.html';
+                    } else if (response.status === 401 && refreshToken) {
+                        // Token expired, try to refresh it
+                        try {
+                            const refreshResponse = await fetch(`${API_URL}/refresh-token`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'CSRF-Token': csrfToken
+                                },
+                                body: JSON.stringify({ refreshToken })
+                            });
+                            
+                            if (refreshResponse.ok) {
+                                const refreshData = await refreshResponse.json();
+                                // Update access token in localStorage
+                                localStorage.setItem('token', refreshData.token);
+                                // Redirect to dashboard
+                                window.location.href = 'dashboard.html';
+                            } else {
+                                // Refresh token is invalid, clear storage
+                                localStorage.removeItem('token');
+                                localStorage.removeItem('refreshToken');
+                                localStorage.removeItem('user');
+                            }
+                        } catch (error) {
+                            console.error('Token refresh error:', error);
+                            localStorage.removeItem('token');
+                            localStorage.removeItem('refreshToken');
+                            localStorage.removeItem('user');
+                        }
                     } else {
                         // Token is invalid, remove it
                         localStorage.removeItem('token');
+                        localStorage.removeItem('refreshToken');
                         localStorage.removeItem('user');
                     }
-                })
-                .catch(error => {
+                } catch (error) {
                     console.error('Token verification error:', error);
                     localStorage.removeItem('token');
+                    localStorage.removeItem('refreshToken');
                     localStorage.removeItem('user');
-                });
+                }
             }
         });
 
         // Handle login form submission
         loginForm.addEventListener('submit', async (event) => {
             event.preventDefault();
+            
+            // Ensure we have a CSRF token
+            if (!csrfToken) {
+                await fetchCsrfToken();
+            }
             
             const loginData = {
                 username: usernameInput.value.trim(),
@@ -109,7 +173,8 @@
                 const response = await fetch(`${API_URL}/login`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'CSRF-Token': csrfToken
                     },
                     body: JSON.stringify(loginData)
                 });
@@ -117,8 +182,9 @@
                 const result = await response.json();
                 
                 if (response.ok) {
-                    // Save token and user info to localStorage
+                    // Save tokens and user info to localStorage
                     localStorage.setItem('token', result.token);
+                    localStorage.setItem('refreshToken', result.refreshToken);
                     localStorage.setItem('user', JSON.stringify(result.user));
                     
                     // Redirect to dashboard page
